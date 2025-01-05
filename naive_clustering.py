@@ -131,7 +131,7 @@ def plot_represntatives(partition):
 
 
 def main():
-    filepath = 'ITS_graphs.pkl'
+    filepath = 'ITS_graphs.pkl.gz'
     data = load_from_pickle(filepath)
     reaction_centers = [get_rc(d['ITS']) for d in data]
 
