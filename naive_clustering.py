@@ -1,115 +1,157 @@
-import pickle
+"""
+This file implements a clustering algorithm based on graph isomorphism to group chemical reactions.
+
+Glossary:
+- Reaction Center: A graph representation of a chemical reaction.
+- Reaction: A dictionary containing a Reaction Center and its calculated graph invariants.
+- Cluster: A set of reactions. Also called isomorphism class.
+- Cluster Space: A set of clusters.
+"""
+
+import time
 import networkx as nx
 import matplotlib.pyplot as plt
+from typing import List, Dict
+
 from synutility.SynIO.data_type import load_from_pickle, save_to_pickle 
 from synutility.SynVis.graph_visualizer import GraphVisualizer
 from synutility.SynAAM.misc import get_rc
 import networkx.algorithms.isomorphism as iso
-import time
 
 
-def is_isomorphic_to_partition(rc, partition):
-    """Checks if a reaction center (rc) is isomorphic to any set in the partition and returns index of set."""
-    for i, subset in enumerate(partition):
+# Type definitions
+ReactionCenter = nx.Graph
+Reaction = Dict[str, any]
+Cluster = List[Reaction]
+ClusterSpace = List[Cluster]
+
+
+def find_isomorphism_class(reaction: Reaction, cluster_space: ClusterSpace) -> int:
+    """
+    Attempts to find the isomorphism class of a reaction.
+    Returns the index of the cluster if found, otherwise None.
+    """
+    for i, cluster in enumerate(cluster_space):
         if nx.is_isomorphic(
-            subset[0], rc,
+            cluster[0]['graph'], reaction['graph'],
             node_match=iso.categorical_node_match(["charge", "element"], [1, 'H']),
             edge_match=iso.categorical_edge_match("order", (1.0, 1.0))
         ):
             return i
+        
     return None
 
 
-# • Implement a simple clustering algorithm:
-# – Input: Set of reactions R
-# – Out: Partition Q ∶= Q1,Q2,...,QN as defined above
-# – for each reaction r in R:
-#     let rc be the reaction center of r
-#     for each Qi in Q:
-#         if rc is isomorphic to a representative of Qi, add Qi = Qi ∪ rc; break;
-#     if rc could not be added to any set, add a new set Qj = {rc} to Q
-def naive_cluster_reaction_centers(reaction_centers):
-    """Clusters reaction centers into partitions based on isomorphism."""
-    partition = []
-    for rc in reaction_centers:
-        index = is_isomorphic_to_partition(rc['graph'], partition)
-        if index is not None: # Add to existing partition
-            partition[index].append(rc['graph'])
+# WP2: Clustering of reaction centers based on graph isomorphism
+def naive_clustering(reactions: List[Reaction]) -> ClusterSpace:
+    """
+    Groups reactions into isomorphism classes.
+    Returns the cluster space.
+    """
+    cluster_space = []
+
+    for reaction in reactions:
+        index = find_isomorphism_class(reaction, cluster_space)
+        if index is not None:
+            # Add to existing partition
+            cluster_space[index].append(reaction)
         else:
-            partition.append([rc['graph']])
-    return partition
+            # Create a new partition
+            cluster_space.append([reaction])
 
-# We now want to apply pre-filters to roughly group reactions before applying WP2 on sub-
-# groups.
-# • From the lecture we know that graph invariants do not change between isormorphic
-# graphs, granting them their name.
-# • We therefore can use them to group our reactions:
-# – If the invariant is identical, reactions centers may be isomorphic, so they are added
-# to the same cluster.
-# – If the invariant is different, reactions centers cannot be isomorphic, so they must
-# appear in different clusters.
-#     • Modify WP2 such that graphs are clustered not by isomorphism, but by the invariant.
-#     • Apply isomorphism clustering to further subdivide each invariant cluster to the final
-#     isomorphism cluster set Q.
-# • Test various graph invariants of your liking, including at least vertex and edge counts,
-# vertex degrees, algebraic connectivity and rank (look here for inspiration https://en.wikipedia.org/wiki/Category:Graph_invariants).
+    return cluster_space
 
-def get_graph_invariants(graph):
-    """Returns a dictionary of graph invariants."""
-    # unoptimized (computes all invarinats if only one is needed)
+
+# WP3: Pre-filtering of reaction centers based on graph invariants
+def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[str, any]:
+    """
+    Calculates all relevant graph invariants for a reaction center.
+    Returns a dictionary of calculated invariants.
+    """
     invariants = {}
-    # invariants['vertex_count'] = graph.number_of_nodes()
-    # invariants['edge_count'] = graph.number_of_edges()
-    # invariants['degree_sequence'] = sorted([d for n, d in graph.degree()], reverse=True)
-    invariants['lex_node_sequence'] = sorted([graph.nodes[n]['element'] for n in graph.nodes], reverse=True)
-    # invariants['algebraic_connectivity'] = round(nx.linalg.algebraic_connectivity(graph), 3)
-    # invariants['rank'] = graph.number_of_nodes() - nx.number_connected_components(graph)
-    # invariants['rank'] = nx.linalg.graphmatrix.adjacency_matrix(graph).todense().rank()
-    # invariants['wl1'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=1, node_attr='elecharge', edge_attr='order')
-    # invariants['wl2'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=2, node_attr='elecharge', edge_attr='order')
-    # invariants['wl3'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=3, node_attr='elecharge', edge_attr='order')
+    reaction_center = reaction['graph']
+    for inv in relevant_invariants:
+        match inv:
+            case 'vertex_count':
+                invariants[inv] = reaction_center.number_of_nodes()
+            case 'edge_count':
+                invariants[inv] = reaction_center.number_of_edges()
+            case 'degree_sequence':
+                invariants[inv] = sorted([d for n, d in reaction_center.degree()], reverse=True)
+            case 'lex_node_sequence':
+                invariants[inv] = sorted([reaction_center.nodes[n]['element'] 
+                                          for n in reaction_center.nodes], reverse=True)
+            case 'algebraic_connectivity':
+                invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
+            # TODO: Fix rank calculation
+            # case 'rank':
+            #     invariants[inv] = reaction_center.number_of_nodes() - nx.number_connected_components(reaction_center)
+            case 'wl1':
+                invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=1, node_attr='elecharge', edge_attr='order')
+            case 'wl2':
+                invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=2, node_attr='elecharge', edge_attr='order')
+            case 'wl3':
+                invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=3, node_attr='elecharge', edge_attr='order')
+
     return invariants
 
 
-def compare_graph_invariants(all_invariants_graph1, all_invariants_graph2, relevant_invariants):
-    """Compares two graphs based on a list of invariants."""
+def compare_graph_invariants(reaction1: Dict[str, any], reaction2: Dict[str, any], relevant_invariants) -> bool:
+    """
+    Compares two reactions based on their graph invariants.
+    Returns True if all invariants are equal, otherwise False.
+    """
+    reaction1_invariants = reaction1['invariants']
+    reaction2_invariants = reaction2['invariants']
+    
     for inv in relevant_invariants:
-        if all_invariants_graph1[inv] != all_invariants_graph2[inv]:
+        if reaction1_invariants[inv] != reaction2_invariants[inv]:
             return False
+        
     return True
 
 
-def cluster_by_invariant(reaction_centers, relevant_invariants):
-    """Clusters reaction centers based on graph invariants given by a list of invariants you want to use."""
-    partition = []
-    test = 0
-    for rc in reaction_centers:
-        test += 1
-        all_invariants = get_graph_invariants(rc)
+def filter_by_invariants(reactions: List[Reaction], relevant_invariants: List) -> ClusterSpace:
+    """
+    Pre-filters reactions based on the invariants of their reaction centers.
+    Returns the filtered cluster space.
+    """
+    cluster_space = []
+    count = 0
+
+    for current_reaction in reactions:
+        count += 1
+        current_reaction['invariants'] = get_graph_invariants(current_reaction, relevant_invariants)
         index = None
-        for i, subset in enumerate(partition):
-            if compare_graph_invariants(all_invariants, subset[0]['invariants'], relevant_invariants): # unoptimized
+        for i, cluster in enumerate(cluster_space):
+            if compare_graph_invariants(current_reaction, cluster[0], relevant_invariants):
                 index = i
                 break
         if index is not None:
-            partition[index].append({'graph':rc, 'invariants': all_invariants})
+            # Cluster found
+            cluster_space[index].append(current_reaction)
         else:
-            partition.append([{'graph':rc, 'invariants': all_invariants}])
-            # print(test)
-            # print(f"New partition added: {all_invariants}")
+            # Create a new cluster
+            cluster_space.append([current_reaction])
+            print(count)
+            print(f"New partition added: {current_reaction['invariants']}")
 
-    print(f"Number of partitions after filtering: {len(partition)}")
-    return partition
+    print(f"Number of clusters after pre-filtering: {len(cluster_space)}")
+    return cluster_space
 
 
-def naive_cluster_filtered_reaction_centers(filtered_reaction_centers):
-    """Clusters reaction centers that are already partitioned by invariants further into partitions based on isomorphism."""
-    partition = []
-    for invariant_cluster in filtered_reaction_centers:
-        sub_partition = naive_cluster_reaction_centers(invariant_cluster)
-        partition.extend(sub_partition)
-    return partition
+def cluster_filtered_reactions(filtered_reactions: ClusterSpace) -> ClusterSpace:
+    """
+    Groups reactions into isomorphism classes after pre-filtering.
+    Returns the cluster space.
+    """
+    final_cluster_space = []
 
+    for invariant_cluster in filtered_reactions:
+        final_clusters = naive_clustering(invariant_cluster)
+        final_cluster_space.extend(final_clusters)
+
+    return final_cluster_space
 
 
 def plot_partition(partition, partition_index=0):
@@ -135,27 +177,29 @@ def plot_representatives(partition):
 def main():
     filepath = 'ITS_largerdataset.pkl.gz'
     data = load_from_pickle(filepath)
+
+    # Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
     for datum in data:
         graph = datum['ITS']
         for node in graph.nodes:
-            graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
-    reaction_centers = [get_rc(d['ITS'], element_key=['element', 'charge', 'typesGH', 'elecharge']) for d in data]
+            graph.nodes[node]['elecharge'] = f'{graph.nodes[node]['element']}{graph.nodes[node]['charge']}'
+    
+    reactions = [{'graph': get_rc(datum['ITS'], element_key=['element', 'charge', 'typesGH', 'atom_map', 'elecharge'])} for datum in data]
 
     print("Starting clustering...")
     start_time = time.process_time()
-    # partition = naive_cluster_reaction_centers(reaction_centers) # not working because list of dicts is expected
-    partition = cluster_by_invariant(reaction_centers, ['lex_node_sequence'])
-    partition = naive_cluster_filtered_reaction_centers(partition)
-    # for rc in reaction_centers:
-    #     nx.algorithms.weisfeiler_lehman_graph_hash(rc, iterations=1, node_attr='elecharge', edge_attr='order')
+    # cluster_space = naive_clustering(reactions)
+    cluster_space = filter_by_invariants(reactions, ['wl1'])
+    cluster_space = cluster_filtered_reactions(cluster_space)
     end_time = time.process_time()
 
     print(f"Time taken: {end_time - start_time:.4f} seconds")
-    print(f"Total reaction centers: {len(reaction_centers)}")
-    print(f"Number of partitions: {len(partition)}")
+    print(f"Total reaction centers: {len(reactions)}")
+    print(f"Number of clusters: {len(cluster_space)}")
     # Plot a specific partition (e.g., the fourth partition)
     # plot_partition(partition, partition_index=3)
     # plot_representatives(partition)
+
 
 if __name__ == "__main__":
     main()
