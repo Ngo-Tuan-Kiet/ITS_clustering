@@ -1,7 +1,7 @@
 import pickle
 import networkx as nx
 import matplotlib.pyplot as plt
-from synutility.SynIO.data_type import load_from_pickle
+from synutility.SynIO.data_type import load_from_pickle, save_to_pickle 
 from synutility.SynVis.graph_visualizer import GraphVisualizer
 from synutility.SynAAM.misc import get_rc
 import networkx.algorithms.isomorphism as iso
@@ -32,11 +32,11 @@ def naive_cluster_reaction_centers(reaction_centers):
     """Clusters reaction centers into partitions based on isomorphism."""
     partition = []
     for rc in reaction_centers:
-        index = is_isomorphic_to_partition(rc, partition)
+        index = is_isomorphic_to_partition(rc['graph'], partition)
         if index is not None: # Add to existing partition
-            partition[index].append(rc)
+            partition[index].append(rc['graph'])
         else:
-            partition.append([rc])
+            partition.append([rc['graph']])
     return partition
 
 # We now want to apply pre-filters to roughly group reactions before applying WP2 on sub-
@@ -58,21 +58,23 @@ def get_graph_invariants(graph):
     """Returns a dictionary of graph invariants."""
     # unoptimized (computes all invarinats if only one is needed)
     invariants = {}
-    invariants['vertex_count'] = graph.number_of_nodes()
-    invariants['edge_count'] = graph.number_of_edges()
-    invariants['degree_sequence'] = sorted([d for n, d in graph.degree()], reverse=True)
+    # invariants['vertex_count'] = graph.number_of_nodes()
+    # invariants['edge_count'] = graph.number_of_edges()
+    # invariants['degree_sequence'] = sorted([d for n, d in graph.degree()], reverse=True)
     invariants['lex_node_sequence'] = sorted([graph.nodes[n]['element'] for n in graph.nodes], reverse=True)
-    # invariants['algebraic_connectivity'] = nx.algebraic_connectivity(graph) # bugggy (value that should be the same are not because of small numerical differences)
+    # invariants['algebraic_connectivity'] = round(nx.linalg.algebraic_connectivity(graph), 3)
+    # invariants['rank'] = graph.number_of_nodes() - nx.number_connected_components(graph)
     # invariants['rank'] = nx.linalg.graphmatrix.adjacency_matrix(graph).todense().rank()
+    # invariants['wl1'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=1, node_attr='elecharge', edge_attr='order')
+    # invariants['wl2'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=2, node_attr='elecharge', edge_attr='order')
+    # invariants['wl3'] = nx.algorithms.weisfeiler_lehman_graph_hash(graph, iterations=3, node_attr='elecharge', edge_attr='order')
     return invariants
 
 
-def compare_graph_invariants(graph1, graph2, invariants):
+def compare_graph_invariants(all_invariants_graph1, all_invariants_graph2, relevant_invariants):
     """Compares two graphs based on a list of invariants."""
-    invariants1 = get_graph_invariants(graph1)
-    invariants2 = get_graph_invariants(graph2) # unoptimized
-    for inv in invariants:
-        if invariants1[inv] != invariants2[inv]:
+    for inv in relevant_invariants:
+        if all_invariants_graph1[inv] != all_invariants_graph2[inv]:
             return False
     return True
 
@@ -86,15 +88,15 @@ def cluster_by_invariant(reaction_centers, relevant_invariants):
         all_invariants = get_graph_invariants(rc)
         index = None
         for i, subset in enumerate(partition):
-            if compare_graph_invariants(rc, subset[0], relevant_invariants): # unoptimized
+            if compare_graph_invariants(all_invariants, subset[0]['invariants'], relevant_invariants): # unoptimized
                 index = i
                 break
         if index is not None:
-            partition[index].append(rc)
+            partition[index].append({'graph':rc, 'invariants': all_invariants})
         else:
-            partition.append([rc])
-            print(test)
-            print(f"New partition added: {all_invariants}")
+            partition.append([{'graph':rc, 'invariants': all_invariants}])
+            # print(test)
+            # print(f"New partition added: {all_invariants}")
 
     print(f"Number of partitions after filtering: {len(partition)}")
     return partition
@@ -120,7 +122,7 @@ def plot_partition(partition, partition_index=0):
         fig, ax = plt.subplots(figsize=(15, 10))  # Create a new figure for the next plot
 
 
-def plot_represntatives(partition):
+def plot_representatives(partition):
     """Plots a representative of each partition."""
     fig, ax = plt.subplots(figsize=(15, 10))
     vis = GraphVisualizer()
@@ -131,22 +133,29 @@ def plot_represntatives(partition):
 
 
 def main():
-    filepath = 'ITS_graphs.pkl.gz'
+    filepath = 'ITS_largerdataset.pkl.gz'
     data = load_from_pickle(filepath)
-    reaction_centers = [get_rc(d['ITS']) for d in data]
+    for datum in data:
+        graph = datum['ITS']
+        for node in graph.nodes:
+            graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
+    reaction_centers = [get_rc(d['ITS'], element_key=['element', 'charge', 'typesGH', 'elecharge']) for d in data]
 
+    print("Starting clustering...")
     start_time = time.process_time()
-    # partition = naive_cluster_reaction_centers(reaction_centers)
-    partition = cluster_by_invariant(reaction_centers, ['vertex_count', 'edge_count', 'degree_sequence', 'lex_node_sequence'])
+    # partition = naive_cluster_reaction_centers(reaction_centers) # not working because list of dicts is expected
+    partition = cluster_by_invariant(reaction_centers, ['lex_node_sequence'])
     partition = naive_cluster_filtered_reaction_centers(partition)
+    # for rc in reaction_centers:
+    #     nx.algorithms.weisfeiler_lehman_graph_hash(rc, iterations=1, node_attr='elecharge', edge_attr='order')
     end_time = time.process_time()
 
-
+    print(f"Time taken: {end_time - start_time:.4f} seconds")
     print(f"Total reaction centers: {len(reaction_centers)}")
     print(f"Number of partitions: {len(partition)}")
-    print(f"Time taken: {end_time - start_time:.4f} seconds")
     # Plot a specific partition (e.g., the fourth partition)
     # plot_partition(partition, partition_index=3)
+    # plot_representatives(partition)
 
 if __name__ == "__main__":
     main()
