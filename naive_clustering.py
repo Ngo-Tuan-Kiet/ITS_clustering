@@ -4,7 +4,7 @@ This file implements a clustering algorithm based on graph isomorphism to group 
 Glossary:
 - Reaction Center: A graph representation of a chemical reaction.
 - Reaction: A dictionary containing a Reaction Center and its calculated graph invariants.
-- Cluster: A set of reactions. Also called isomorphism class.
+- Cluster / Isomerism class: A set of reactions.
 - Cluster Space: A set of clusters.
 """
 
@@ -13,9 +13,8 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from typing import List, Dict
 
-from synutility.SynIO.data_type import load_from_pickle, save_to_pickle 
+from synutility.SynIO.data_type import load_from_pickle
 from synutility.SynVis.graph_visualizer import GraphVisualizer
-from synutility.SynAAM.misc import get_rc
 import networkx.algorithms.isomorphism as iso
 
 
@@ -147,11 +146,32 @@ def cluster_filtered_reactions(filtered_reactions: ClusterSpace) -> ClusterSpace
     """
     final_cluster_space = []
 
-    for invariant_cluster in filtered_reactions:
-        final_clusters = naive_clustering(invariant_cluster)
+    for group in filtered_reactions:
+        final_clusters = naive_clustering(group)
         final_cluster_space.extend(final_clusters)
 
     return final_cluster_space
+
+
+def get_reaction_center(
+        its: nx.graph,
+        element_key: list = ['element', 'charge', 'elecharge'],
+        bond_key: str = 'order',
+        standard_order: str = 'standard_order'
+        ) -> ReactionCenter:
+    """
+    Finds the reaction center of an ITS graph using standard order edge attributes.
+    Returns the reaction center.
+    """
+    reaction_center = nx.Graph()
+
+    for n1, n2, data in its.edges(data=True):
+        if data['standard_order'] != 0:
+            reaction_center.add_node(n1, **{k: its.nodes[n1][k] for k in element_key if k in its.nodes[n1]})
+            reaction_center.add_node(n2, **{k: its.nodes[n2][k] for k in element_key if k in its.nodes[n2]})
+            reaction_center.add_edge(n1, n2, **{k: data[k] for k in data})
+
+    return reaction_center
 
 
 def plot_partition(partition, partition_index=0):
@@ -175,7 +195,7 @@ def plot_representatives(partition):
 
 
 def main():
-    filepath = 'ITS_largerdataset.pkl.gz'
+    filepath = 'ITS_graphs.pkl.gz'
     data = load_from_pickle(filepath)
 
     # Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
@@ -184,7 +204,7 @@ def main():
         for node in graph.nodes:
             graph.nodes[node]['elecharge'] = f'{graph.nodes[node]['element']}{graph.nodes[node]['charge']}'
     
-    reactions = [{'graph': get_rc(datum['ITS'], element_key=['element', 'charge', 'typesGH', 'atom_map', 'elecharge'])} for datum in data]
+    reactions = [{'graph': get_reaction_center(datum['ITS'])} for datum in data]
 
     print("Starting clustering...")
     start_time = time.process_time()
