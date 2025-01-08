@@ -212,15 +212,19 @@ def measure_clustering_time(reactions, invariants_list):
     results = []
 
     for invariants in invariants_list:
+        start_time_pre_filter = time.process_time()
+        cluster_space_pre_filter = filter_by_invariants(reactions, invariants)
+        end_time_pre_filter = time.process_time()
         start_time = time.process_time()
-        cluster_space = filter_by_invariants(reactions, invariants)
-        cluster_space = cluster_filtered_reactions(cluster_space)
+        cluster_space = cluster_filtered_reactions(cluster_space_pre_filter)
         end_time = time.process_time()
         
         cpu_time = end_time - start_time
         results.append({
             'Invariants': invariants,
-            'CPU Time (seconds)': cpu_time,
+            'CPU Time for pre-filtering (seconds)': end_time_pre_filter - start_time_pre_filter,
+            'Number of Clusters after pre-filtering': len(cluster_space_pre_filter),
+            'CPU Time for clustering (seconds)': cpu_time,
             'Number of Clusters': len(cluster_space)
         })
     
@@ -263,16 +267,16 @@ reactions_big_with_neighbors = [{'R_ID': datum['R_ID'],
 
 
 
-# print("Starting clustering...")
-# start_time = time.process_time()
-# # cluster_space = naive_clustering(reactions)
-# cluster_space = filter_by_invariants(reactions, ['rank'])
-# cluster_space = cluster_filtered_reactions(cluster_space)
-# end_time = time.process_time()
+print("Starting clustering...")
+start_time = time.process_time()
+# cluster_space = naive_clustering(reactions)
+cluster_space = filter_by_invariants(reactions_big, ['wl1'])
+cluster_space = cluster_filtered_reactions(cluster_space)
+end_time = time.process_time()
 
-# print(f"Time taken: {end_time - start_time:.4f} seconds")
-# print(f"Total reaction centers: {len(reactions)}")
-# print(f"Number of clusters: {len(cluster_space)}")
+print(f"Time taken: {end_time - start_time:.4f} seconds")
+print(f"Total reaction centers: {len(reactions_big)}")
+print(f"Number of clusters: {len(cluster_space)}")
 
  
 
@@ -310,8 +314,8 @@ df_big_with_neighbors = pd.DataFrame(results_big_with_neighbors)
 
 # df.to_csv('df', sep=',', index=False, encoding='utf-8')
 # df_with_neighbors.to_csv('df_with_neighbors', sep=',', index=False, encoding='utf-8')
-# df_big.to_csv('df_big', sep=',', index=False, encoding='utf-8')
-# df_big_with_neighbors.to_csv('df_big_with_neighbors', sep=',', index=False, encoding='utf-8')
+df_big.to_csv('df_big', sep=',', index=False, encoding='utf-8')
+df_big_with_neighbors.to_csv('df_big_with_neighbors', sep=',', index=False, encoding='utf-8')
 
 
 # Display the DataFrame
