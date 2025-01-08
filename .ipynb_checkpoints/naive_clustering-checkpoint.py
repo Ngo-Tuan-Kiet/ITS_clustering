@@ -7,7 +7,7 @@ Glossary:
 - Cluster / Isomerism class: A set of reactions.
 - Cluster Space: A set of clusters.
 """
-
+#%%
 import time
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ from synutility.SynIO.data_type import load_from_pickle
 from synutility.SynVis.graph_visualizer import GraphVisualizer
 import networkx.algorithms.isomorphism as iso
 
-
+#%%
 
 # Type definitions
 ReactionCenter = nx.Graph
@@ -208,6 +208,58 @@ def plot_representatives(partition):
         plt.show()
         fig, ax = plt.subplots(figsize=(15, 10))  # Create a new figure for the next plot
 
+#%%
+
+filepath = 'ITS_graphs.pkl.gz'
+data = load_from_pickle(filepath)
+
+# Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
+for datum in data:
+    graph = datum['ITS']
+    for node in graph.nodes:
+        graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
+
+reactions = [{'R-id': datum['R-id'],
+              'graph': get_reaction_center(datum['ITS'], nb_range=0)} for datum in data]
+reactions_with_neighbors = [{'R-id': datum['R-id'],
+                             'graph': get_reaction_center(datum['ITS'], nb_range=1)} for datum in data]
+
+#%%
+filepath_big = 'ITS_largerdataset.pkl.gz'
+data_big = load_from_pickle(filepath_big)
+
+# Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
+for datum in data_big:
+    graph = datum['ITS']
+    for node in graph.nodes:
+        graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
+
+reactions_big = [{'R_ID': datum['R_ID'],
+              'graph': get_reaction_center(datum['ITS'], nb_range=0)} for datum in data_big]
+reactions_big_with_neighbors = [{'R_ID': datum['R_ID'],
+                             'graph': get_reaction_center(datum['ITS'], nb_range=1)} for datum in data_big]
+
+
+#%%
+
+print("Starting clustering...")
+start_time = time.process_time()
+# cluster_space = naive_clustering(reactions)
+cluster_space = filter_by_invariants(reactions, ['rank'])
+cluster_space = cluster_filtered_reactions(cluster_space)
+end_time = time.process_time()
+
+print(f"Time taken: {end_time - start_time:.4f} seconds")
+print(f"Total reaction centers: {len(reactions)}")
+print(f"Number of clusters: {len(cluster_space)}")
+
+#%% 
+
+# Plot a specific partition (e.g., the fourth partition)
+# plot_partition(partition, partition_index=3)
+plot_representatives(cluster_space)
+
+#%%
 def measure_clustering_time(reactions, invariants_list):
     results = []
 
@@ -226,62 +278,7 @@ def measure_clustering_time(reactions, invariants_list):
     
     return results
 
-
-# print("Loading small data...")
-# filepath = 'ITS_graphs.pkl.gz'
-# data = load_from_pickle(filepath)
-
-# # Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
-# for datum in data:
-#     graph = datum['ITS']
-#     for node in graph.nodes:
-#         graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
-
-# reactions = [{'R-id': datum['R-id'],
-#               'graph': get_reaction_center(datum['ITS'], nb_range=0)} for datum in data]
-# reactions_with_neighbors = [{'R-id': datum['R-id'],
-#                              'graph': get_reaction_center(datum['ITS'], nb_range=1)} for datum in data]
-
-
-print("Loading large data...")
-filepath_big = 'ITS_largerdataset.pkl.gz'
-data_big = load_from_pickle(filepath_big)
-
-# Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
-for datum in data_big:
-    graph = datum['ITS']
-    for node in graph.nodes:
-        graph.nodes[node]['elecharge'] = f'{graph.nodes[node]["element"]}{graph.nodes[node]["charge"]}'
-
-print("Reactions big...")
-reactions_big = [{'R_ID': datum['R_ID'],
-              'graph': get_reaction_center(datum['ITS'], nb_range=0)} for datum in data_big]
-print("Reactions big done")
-reactions_big_with_neighbors = [{'R_ID': datum['R_ID'],
-                             'graph': get_reaction_center(datum['ITS'], nb_range=1)} for datum in data_big]
-
-
-
-
-# print("Starting clustering...")
-# start_time = time.process_time()
-# # cluster_space = naive_clustering(reactions)
-# cluster_space = filter_by_invariants(reactions, ['rank'])
-# cluster_space = cluster_filtered_reactions(cluster_space)
-# end_time = time.process_time()
-
-# print(f"Time taken: {end_time - start_time:.4f} seconds")
-# print(f"Total reaction centers: {len(reactions)}")
-# print(f"Number of clusters: {len(cluster_space)}")
-
- 
-
-# Plot a specific partition (e.g., the fourth partition)
-# plot_partition(partition, partition_index=3)
-# plot_representatives(cluster_space)
-
-
-
+#%%
 # Define the list of invariants to test
 invariants_list = [
     ['vertex_count'],
@@ -297,22 +294,50 @@ invariants_list = [
 ]
 
 # Measure the clustering time for each set of invariants
-# results = measure_clustering_time(reactions, invariants_list)
-# results_with_neighbors = measure_clustering_time(reactions_with_neighbors, invariants_list)
+results = measure_clustering_time(reactions, invariants_list)
+results_with_neighbors = measure_clustering_time(reactions_with_neighbors, invariants_list)
 results_big = measure_clustering_time(reactions_big, invariants_list)
 results_big_with_neighbors = measure_clustering_time(reactions_big_with_neighbors, invariants_list)
 
 # Create a DataFrame from the results
-# df = pd.DataFrame(results)
-# df_with_neighbors = pd.DataFrame(results_with_neighbors)
+df = pd.DataFrame(results)
+df_with_neighbors = pd.DataFrame(results_with_neighbors)
 df_big = pd.DataFrame(results_big)
 df_big_with_neighbors = pd.DataFrame(results_big_with_neighbors)
 
-# df.to_csv('df', sep=',', index=False, encoding='utf-8')
-# df_with_neighbors.to_csv('df_with_neighbors', sep=',', index=False, encoding='utf-8')
-# df_big.to_csv('df_big', sep=',', index=False, encoding='utf-8')
-# df_big_with_neighbors.to_csv('df_big_with_neighbors', sep=',', index=False, encoding='utf-8')
-
-
 # Display the DataFrame
-print(df_big)
+print(df)
+
+# %%
+print(cluster_space[0][0])
+
+# %%
+for i, cluster in enumerate(cluster_space):
+    print(cluster_space[i][0]['R-id'])
+# %%
+
+# Plot the graph with R-id 39507
+for datum in data:
+    if datum['R-id'] == 39507:
+        graph = datum['ITS']
+        break
+
+fig, ax = plt.subplots(figsize=(15, 10))
+vis = GraphVisualizer()
+vis.plot_its(graph, ax, use_edge_color=True)
+plt.show()
+# %%
+
+# check in which cluster the graph with R-id 39507 is
+for i, cluster in enumerate(cluster_space):
+    for reaction in cluster:
+        if reaction['R-id'] == 39507:
+            print(i)
+            break
+
+# %%
+plot_partition(cluster_space, partition_index=171)
+# %%
+
+print(len(cluster_space))
+# %%
