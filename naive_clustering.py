@@ -11,18 +11,44 @@ Glossary:
 import time
 import networkx as nx
 import matplotlib.pyplot as plt
+import pandas as pd
 from typing import List, Dict
 
 from synutility.SynIO.data_type import load_from_pickle
 from synutility.SynVis.graph_visualizer import GraphVisualizer
 import networkx.algorithms.isomorphism as iso
 
-
 # Type definitions
 ReactionCenter = nx.Graph
 Reaction = Dict[str, any]
 Cluster = List[Reaction]
 ClusterSpace = List[Cluster]
+
+# Global variables
+FILEPATH = 'ITS_graphs.pkl.gz'
+FILEPATH_BIG = 'ITS_largerdataset.pkl.gz'
+NB_RANGE = 1
+BENCHMARK_CSV = f'benchmark_results_big_nb{NB_RANGE}.csv'
+
+
+def load_reactions(filepath: str, nb_range: int = 0) -> List[Reaction]:
+    """
+    Loads a list of reactions from a pickle file.
+    Returns the list of reactions.
+    """
+    print(f'Loading reactions from {filepath} with neighborhood range {nb_range}...')
+    data = load_from_pickle(filepath)
+
+    # Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
+    for datum in data:
+        graph = datum['ITS']
+        for node in graph.nodes:
+            graph.nodes[node]['elecharge'] = f'{graph.nodes[node]['element']}{graph.nodes[node]['charge']}'
+    
+    reactions = [{'graph': get_reaction_center(datum['ITS'], nb_range=nb_range)} for datum in data]
+    print(f'Number of reactions loaded: {len(reactions)}')
+
+    return reactions
 
 
 def find_isomorphism_class(reaction: Reaction, cluster_space: ClusterSpace) -> int:
@@ -80,17 +106,25 @@ def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[
             case 'lex_node_sequence':
                 invariants[inv] = sorted([reaction_center.nodes[n]['element'] 
                                           for n in reaction_center.nodes], reverse=True)
-            case 'algebraic_connectivity':
-                invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
-            # TODO: Fix rank calculation
+            # NetworkX function might be incorrect
+            # case 'algebraic_connectivity':
+            #     invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
+            # FIXME: Correct the calculation of rank
             # case 'rank':
             #     invariants[inv] = reaction_center.number_of_nodes() - nx.number_connected_components(reaction_center)
+            case 'wiener_index':
+                invariants[inv] = nx.algorithms.wiener_index(reaction_center)
+            # Estrada is not an invariant
+            # case 'estrada_index':
+            #     invariants[inv] = nx.algorithms.estrada_index(reaction_center)
             case 'wl1':
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=1, node_attr='elecharge', edge_attr='order')
             case 'wl2':
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=2, node_attr='elecharge', edge_attr='order')
             case 'wl3':
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=3, node_attr='elecharge', edge_attr='order')
+            case _:
+                print(f"Invalid invariant: {inv}, continuing...")
 
     return invariants
 
@@ -132,10 +166,10 @@ def filter_by_invariants(reactions: List[Reaction], relevant_invariants: List) -
         else:
             # Create a new cluster
             cluster_space.append([current_reaction])
-            print(count)
-            print(f"New partition added: {current_reaction['invariants']}")
+    #         print(count)
+    #         print(f"New partition added: {current_reaction['invariants']}")
 
-    print(f"Number of clusters after pre-filtering: {len(cluster_space)}")
+    # print(f"Number of clusters after pre-filtering: {len(cluster_space)}")
     return cluster_space
 
 
@@ -156,20 +190,32 @@ def cluster_filtered_reactions(filtered_reactions: ClusterSpace) -> ClusterSpace
 def get_reaction_center(
         its: nx.graph,
         element_key: list = ['element', 'charge', 'elecharge'],
-        bond_key: str = 'order',
-        standard_order: str = 'standard_order'
+        nb_range: int = 0
         ) -> ReactionCenter:
     """
-    Finds the reaction center of an ITS graph using standard order edge attributes.
+    Finds the reaction center of an ITS graph. Neighborhood range and node keys can be specified.
     Returns the reaction center.
     """
-    reaction_center = nx.Graph()
+    reaction_center_core = nx.Graph()
 
     for n1, n2, data in its.edges(data=True):
         if data['standard_order'] != 0:
-            reaction_center.add_node(n1, **{k: its.nodes[n1][k] for k in element_key if k in its.nodes[n1]})
-            reaction_center.add_node(n2, **{k: its.nodes[n2][k] for k in element_key if k in its.nodes[n2]})
-            reaction_center.add_edge(n1, n2, **{k: data[k] for k in data})
+            reaction_center_core.add_node(n1, **{k: its.nodes[n1][k] for k in element_key if k in its.nodes[n1]})
+            reaction_center_core.add_node(n2, **{k: its.nodes[n2][k] for k in element_key if k in its.nodes[n2]})
+            reaction_center_core.add_edge(n1, n2, **{k: data[k] for k in data})
+
+    if nb_range <= 0:
+        return reaction_center_core
+    
+    # Extend the reaction center to include the neighborhood of radius nb_range
+    reaction_center = reaction_center_core.copy()
+    for _ in range(nb_range):
+        for node in reaction_center_core.nodes:
+            for neighbor in its.neighbors(node):
+                if neighbor not in reaction_center:
+                    reaction_center.add_node(neighbor, **{k: its.nodes[neighbor][k] for k in element_key if k in its.nodes[neighbor]})
+                reaction_center.add_edge(node, neighbor, **{k: its[node][neighbor][k] for k in its[node][neighbor]})
+            reaction_center_core = reaction_center.copy()
 
     return reaction_center
 
@@ -194,31 +240,73 @@ def plot_representatives(partition):
         fig, ax = plt.subplots(figsize=(15, 10))  # Create a new figure for the next plot
 
 
-def main():
-    filepath = 'ITS_graphs.pkl.gz'
-    data = load_from_pickle(filepath)
+def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output_file: str = 'benchmark_results.csv') -> List[Dict]:
+    """
+    Tests a list of invariants and their performance.
 
-    # Combine element and charge to create a unique identifier for each node (necessary for Weisfeiler-Lehman)
-    for datum in data:
-        graph = datum['ITS']
-        for node in graph.nodes:
-            graph.nodes[node]['elecharge'] = f'{graph.nodes[node]['element']}{graph.nodes[node]['charge']}'
+    """
+    results = []
+
+    for invariant in invariant_list:
+        print(f"Testing invariant: {invariant}")
+
+        start_time_pre_filter = time.process_time()
+        cluster_space_pre_filter = filter_by_invariants(reactions, invariant)
+        end_time_pre_filter = time.process_time()
+        pre_filter_time = end_time_pre_filter - start_time_pre_filter
+
+        print('Pre-filtering done. Starting clustering...')
+        start_time = time.process_time()
+        cluster_space = cluster_filtered_reactions(cluster_space_pre_filter)
+        end_time = time.process_time()
+        cluster_time = end_time - start_time
+        
+        results.append({
+            'Invariant': invariant,
+            'CPU Time for pre-filtering (seconds)': pre_filter_time,
+            'Number of Clusters after pre-filtering': len(cluster_space_pre_filter),
+            'CPU Time for clustering (seconds)': cluster_time,
+            'Number of Clusters': len(cluster_space),
+            'Total CPU Time (seconds)': pre_filter_time + cluster_time
+        })
     
-    reactions = [{'graph': get_reaction_center(datum['ITS'])} for datum in data]
+    results_df = pd.DataFrame(results)
+    print(f'Writing results to {output_file}...')
+    results_df.to_csv(output_file, index=False)
 
-    print("Starting clustering...")
-    start_time = time.process_time()
-    # cluster_space = naive_clustering(reactions)
-    cluster_space = filter_by_invariants(reactions, ['wl1'])
-    cluster_space = cluster_filtered_reactions(cluster_space)
-    end_time = time.process_time()
 
-    print(f"Time taken: {end_time - start_time:.4f} seconds")
-    print(f"Total reaction centers: {len(reactions)}")
-    print(f"Number of clusters: {len(cluster_space)}")
+def main():
+    reactions = load_reactions(FILEPATH_BIG, nb_range=NB_RANGE)
+
+    # print("Starting clustering...")
+    # start_time = time.process_time()
+    # # cluster_space = naive_clustering(reactions)
+    # cluster_space = filter_by_invariants(reactions, ['wl1'])
+    # cluster_space = cluster_filtered_reactions(cluster_space)
+    # end_time = time.process_time()
+
+    # print(f"Time taken: {end_time - start_time:.4f} seconds")
+    # print(f"Total reaction centers: {len(reactions)}")
+    # print(f"Number of clusters: {len(cluster_space)}")
+
     # Plot a specific partition (e.g., the fourth partition)
     # plot_partition(partition, partition_index=3)
     # plot_representatives(partition)
+
+    # Benchmarking
+    invariant_list = [
+        ['vertex_count'],
+        ['edge_count'],
+        ['degree_sequence'],
+        ['lex_node_sequence'],
+        ['wiener_index'],
+        ['wl1'],
+        ['wl2'],
+        ['wl3']
+    ]
+
+    benchmark_clustering(invariant_list, reactions, BENCHMARK_CSV)
+    print("Done.")
 
 
 if __name__ == "__main__":
