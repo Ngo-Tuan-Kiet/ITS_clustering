@@ -10,6 +10,7 @@ Glossary:
 
 import time
 import networkx as nx
+import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from typing import List, Dict
@@ -27,8 +28,8 @@ ClusterSpace = List[Cluster]
 # Global variables
 FILEPATH = 'ITS_graphs.pkl.gz'
 FILEPATH_BIG = 'ITS_largerdataset.pkl.gz'
-NB_RANGE = 1
-BENCHMARK_CSV = f'benchmark_results_big_nb{NB_RANGE}.csv'
+NB_RANGE = 0
+BENCHMARK_CSV = f'benchmark_results_small_nb{NB_RANGE}.csv'
 
 
 def load_reactions(filepath: str, nb_range: int = 0) -> List[Reaction]:
@@ -94,7 +95,7 @@ def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[
     Returns a dictionary of calculated invariants.
     """
     invariants = {}
-    reaction_center = reaction['graph']
+    reaction_center: nx.Graph = reaction['graph']
     for inv in relevant_invariants:
         match inv:
             case 'vertex_count':
@@ -105,18 +106,25 @@ def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[
                 invariants[inv] = sorted([d for n, d in reaction_center.degree()], reverse=True)
             case 'lex_node_sequence':
                 invariants[inv] = sorted([reaction_center.nodes[n]['element'] 
-                                          for n in reaction_center.nodes], reverse=True)
-            # NetworkX function might be incorrect
-            # case 'algebraic_connectivity':
-            #     invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
-            # FIXME: Correct the calculation of rank
-            # case 'rank':
-            #     invariants[inv] = reaction_center.number_of_nodes() - nx.number_connected_components(reaction_center)
+                                        for n in reaction_center.nodes], reverse=True)
+            case 'algebraic_connectivity':
+                invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
+            case 'own_algebraic_connectivity':
+                L = nx.laplacian_matrix(reaction_center).toarray()
+                eigenvalues = np.linalg.eigvals(L)
+                invariants[inv] = round(sorted(eigenvalues)[1], 3)
+            case 'rank':
+                invariants[inv] = np.linalg.matrix_rank(nx.to_numpy_array(reaction_center))
+            case 'girth':
+                invariants[inv] = nx.algorithms.girth(reaction_center)
             case 'wiener_index':
                 invariants[inv] = nx.algorithms.wiener_index(reaction_center)
-            # Estrada is not an invariant
-            # case 'estrada_index':
-            #     invariants[inv] = nx.algorithms.estrada_index(reaction_center)
+            case 'gutman_index':
+                invariants[inv] = nx.algorithms.gutman_index(reaction_center)
+            case 'schultz_index':
+                invariants[inv] = nx.algorithms.schultz_index(reaction_center)
+            case 'estrada_index':
+                invariants[inv] = nx.algorithms.estrada_index(reaction_center)
             case 'wl1':
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=1, node_attr='elecharge', edge_attr='order')
             case 'wl2':
@@ -215,7 +223,7 @@ def get_reaction_center(
                 if neighbor not in reaction_center:
                     reaction_center.add_node(neighbor, **{k: its.nodes[neighbor][k] for k in element_key if k in its.nodes[neighbor]})
                 reaction_center.add_edge(node, neighbor, **{k: its[node][neighbor][k] for k in its[node][neighbor]})
-            reaction_center_core = reaction_center.copy()
+        reaction_center_core = reaction_center.copy()
 
     return reaction_center
 
@@ -247,22 +255,38 @@ def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output
     """
     results = []
 
+    # Test naive clustering without pre-filtering first
+    print("\nTesting naive clustering...")
+    start_time = time.process_time()
+    cluster_space = naive_clustering(reactions)
+    end_time = time.process_time()
+    naive_time = end_time - start_time
+    results.append({
+        'Invariant': 'No pre-filtering',
+        'CPU Time for pre-filtering (seconds)': 0,
+        'Number of Clusters after pre-filtering': 0,
+        'CPU Time for clustering (seconds)': naive_time,
+        'Number of Clusters': len(cluster_space),
+        'Total CPU Time (seconds)': naive_time
+    })
+
+    # Test clustering with pre-filtering for each invariant
     for invariant in invariant_list:
-        print(f"Testing invariant: {invariant}")
+        print(f"\nTesting invariant: {', '.join(invariant)}")
 
         start_time_pre_filter = time.process_time()
         cluster_space_pre_filter = filter_by_invariants(reactions, invariant)
         end_time_pre_filter = time.process_time()
         pre_filter_time = end_time_pre_filter - start_time_pre_filter
 
-        print('Pre-filtering done. Starting clustering...')
+        print('Pre-filtering done.')
         start_time = time.process_time()
         cluster_space = cluster_filtered_reactions(cluster_space_pre_filter)
         end_time = time.process_time()
         cluster_time = end_time - start_time
         
         results.append({
-            'Invariant': invariant,
+            'Invariant': ', '.join(invariant),
             'CPU Time for pre-filtering (seconds)': pre_filter_time,
             'Number of Clusters after pre-filtering': len(cluster_space_pre_filter),
             'CPU Time for clustering (seconds)': cluster_time,
@@ -271,12 +295,12 @@ def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output
         })
     
     results_df = pd.DataFrame(results)
-    print(f'Writing results to {output_file}...')
+    print(f'\nWriting results to {output_file}...')
     results_df.to_csv(output_file, index=False)
 
 
 def main():
-    reactions = load_reactions(FILEPATH_BIG, nb_range=NB_RANGE)
+    reactions = load_reactions(FILEPATH, nb_range=NB_RANGE)
 
     # print("Starting clustering...")
     # start_time = time.process_time()
@@ -299,10 +323,21 @@ def main():
         ['edge_count'],
         ['degree_sequence'],
         ['lex_node_sequence'],
+        ['algebraic_connectivity'],
+        ['own_algebraic_connectivity'],
+        ['rank'],
+        ['girth'],
         ['wiener_index'],
+        ['gutman_index'],
+        ['schultz_index'],
+        ['estrada_index'],
         ['wl1'],
         ['wl2'],
-        ['wl3']
+        ['wl3'],
+        ['vertex_count', 'edge_count'],
+        ['lex_node_sequence', 'edge_count'],
+        ['gutman_index', 'wl1'],
+        ['gutman_index', 'wl2']
     ]
 
     benchmark_clustering(invariant_list, reactions, BENCHMARK_CSV)
