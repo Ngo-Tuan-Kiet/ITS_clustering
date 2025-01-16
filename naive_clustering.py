@@ -28,8 +28,8 @@ ClusterSpace = List[Cluster]
 # Global variables
 FILEPATH = 'ITS_graphs.pkl.gz'
 FILEPATH_BIG = 'ITS_largerdataset.pkl.gz'
-NB_RANGE = 0
-BENCHMARK_CSV = f'benchmark_results_small_nb{NB_RANGE}.csv'
+NB_RANGE = 2
+BENCHMARK_CSV = f'benchmark/benchmark_results_big_nb{NB_RANGE}.csv'
 
 
 def load_reactions(filepath: str, nb_range: int = 0) -> List[Reaction]:
@@ -107,6 +107,9 @@ def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[
             case 'lex_node_sequence':
                 invariants[inv] = sorted([reaction_center.nodes[n]['element'] 
                                         for n in reaction_center.nodes], reverse=True)
+            case 'edge_order_sequence':
+                invariants[inv] = sorted([reaction_center.edges[n1, n2]['order'] 
+                                        for n1, n2 in reaction_center.edges], reverse=True)
             case 'algebraic_connectivity':
                 invariants[inv] = round(nx.linalg.algebraic_connectivity(reaction_center), 3)
             case 'own_algebraic_connectivity':
@@ -131,6 +134,12 @@ def get_graph_invariants(reaction: Reaction, relevant_invariants: List) -> Dict[
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=2, node_attr='elecharge', edge_attr='order')
             case 'wl3':
                 invariants[inv] = nx.algorithms.weisfeiler_lehman_graph_hash(reaction_center, iterations=3, node_attr='elecharge', edge_attr='order')
+            case 'own_wl1':
+                invariants[inv] = weisfeiler_leman_hash(reaction_center, iterations=1, node_attr='elecharge', edge_attr='order')
+            case 'own_wl2':
+                invariants[inv] = weisfeiler_leman_hash(reaction_center, iterations=2, node_attr='elecharge', edge_attr='order')
+            case 'own_wl3':
+                invariants[inv] = weisfeiler_leman_hash(reaction_center, iterations=3, node_attr='elecharge', edge_attr='order')
             case _:
                 print(f"Invalid invariant: {inv}, continuing...")
 
@@ -195,6 +204,38 @@ def cluster_filtered_reactions(filtered_reactions: ClusterSpace) -> ClusterSpace
     return final_cluster_space
 
 
+def weisfeiler_leman_hash(graph: nx.Graph, iterations: int = 1, node_attr: str = 'element', edge_attr: str = 'order') -> str:
+    """
+    Computes the Weisfeiler-Leman graph hash of a graph.
+    Returns the hash.
+    """
+    def collect_neighborhood(graph: nx.Graph, node: int, node_labels: dict, edge_attr: str = None) -> str:
+        """
+        Collects the neighborhood of a node.
+        Returns the aggregated string.
+        """
+        label_list = []
+        for neighbor in graph.neighbors(node):
+            edge_label = '' if edge_attr is None else f'{graph[node][neighbor][edge_attr]}'
+            label_list.append(f'{edge_label}{node_labels[neighbor]}')
+
+        return node_labels[node] + ''.join(sorted(label_list))
+
+    # Initialize node labels
+    node_labels = {node: graph.nodes[node][node_attr] for node in graph.nodes}
+
+    # Perform the specified number of iterations
+    for _ in range(iterations):
+        new_labels = {}
+        for node in graph.nodes:
+            label = collect_neighborhood(graph, node, node_labels, edge_attr)
+            new_labels[node] = str(hash(label))
+        node_labels = new_labels
+
+    # Hash the final labels
+    return str(hash(''.join(sorted(node_labels.values()))))
+
+
 def get_reaction_center(
         its: nx.graph,
         element_key: list = ['element', 'charge', 'elecharge'],
@@ -256,19 +297,19 @@ def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output
     results = []
 
     # Test naive clustering without pre-filtering first
-    print("\nTesting naive clustering...")
-    start_time = time.process_time()
-    cluster_space = naive_clustering(reactions)
-    end_time = time.process_time()
-    naive_time = end_time - start_time
-    results.append({
-        'Invariant': 'No pre-filtering',
-        'CPU Time for pre-filtering (seconds)': 0,
-        'Number of Clusters after pre-filtering': 0,
-        'CPU Time for clustering (seconds)': naive_time,
-        'Number of Clusters': len(cluster_space),
-        'Total CPU Time (seconds)': naive_time
-    })
+    # print("\nTesting naive clustering...")
+    # start_time = time.process_time()
+    # cluster_space = naive_clustering(reactions)
+    # end_time = time.process_time()
+    # naive_time = end_time - start_time
+    # results.append({
+    #     'Invariant': 'No pre-filtering',
+    #     'CPU Time for pre-filtering (seconds)': 0,
+    #     'Number of Clusters after pre-filtering': 0,
+    #     'CPU Time for clustering (seconds)': naive_time,
+    #     'Number of Clusters': len(cluster_space),
+    #     'Total CPU Time (seconds)': naive_time
+    # })
 
     # Test clustering with pre-filtering for each invariant
     for invariant in invariant_list:
@@ -300,7 +341,7 @@ def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output
 
 
 def main():
-    reactions = load_reactions(FILEPATH, nb_range=NB_RANGE)
+    reactions = load_reactions(FILEPATH_BIG, nb_range=NB_RANGE)
 
     # print("Starting clustering...")
     # start_time = time.process_time()
@@ -319,25 +360,30 @@ def main():
 
     # Benchmarking
     invariant_list = [
-        ['vertex_count'],
-        ['edge_count'],
-        ['degree_sequence'],
-        ['lex_node_sequence'],
-        ['algebraic_connectivity'],
-        ['own_algebraic_connectivity'],
-        ['rank'],
-        ['girth'],
-        ['wiener_index'],
-        ['gutman_index'],
-        ['schultz_index'],
-        ['estrada_index'],
+        # ['vertex_count'],
+        # ['edge_count'],
+        # ['degree_sequence'],
+        # ['algebraic_connectivity'],
+        # ['own_algebraic_connectivity'],
+        # ['rank'],
+        # ['lex_node_sequence'],
+        # ['edge_order_sequence'],
+        # ['girth'],
+        # ['wiener_index'],
+        # ['gutman_index'],
+        # ['schultz_index'],
+        # ['estrada_index'],
         ['wl1'],
-        ['wl2'],
-        ['wl3'],
-        ['vertex_count', 'edge_count'],
+        # ['wl2'],
+        # ['wl3'],
+        ['own_wl1'],
+        # ['own_wl2'],
+        # ['own_wl3'],
+        # ['vertex_count', 'edge_count'],
         ['lex_node_sequence', 'edge_count'],
-        ['gutman_index', 'wl1'],
-        ['gutman_index', 'wl2']
+        ['lex_node_sequence', 'edge_order_sequence'],
+        # ['gutman_index', 'wl1'],
+        # ['gutman_index', 'own_wl1']
     ]
 
     benchmark_clustering(invariant_list, reactions, BENCHMARK_CSV)

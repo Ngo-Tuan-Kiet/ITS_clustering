@@ -23,6 +23,7 @@ def plot_clustering_times(data: pd.DataFrame):
     """
     invariants = data['Invariant'].unique()
     filter_times = data['CPU Time for pre-filtering (seconds)']
+    found_clusters = data['Number of Clusters after pre-filtering']
     clustering_times = data['CPU Time for clustering (seconds)']
 
     # Plot the data, using stacked bars of different colors for filtering and clustering times
@@ -30,6 +31,9 @@ def plot_clustering_times(data: pd.DataFrame):
     plt.xticks(rotation=45)
     ax.bar(invariants, filter_times, label='Pre-filtering time', color='blue')
     ax.bar(invariants, clustering_times, bottom=filter_times, label='Clustering time', color='lightblue')
+    # Add cluster number above each bar
+    for i, cluster_num in enumerate(found_clusters):
+        ax.text(i, filter_times[i] + clustering_times[i], cluster_num, ha='center', va='bottom')
 
     # Add labels and legend
     ax.set_xlabel('Invariants')
