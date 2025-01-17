@@ -28,8 +28,8 @@ ClusterSpace = List[Cluster]
 # Global variables
 FILEPATH = 'ITS_graphs.pkl.gz'
 FILEPATH_BIG = 'ITS_largerdataset.pkl.gz'
-NB_RANGE = 2
-BENCHMARK_CSV = f'benchmark/benchmark_results_big_nb{NB_RANGE}.csv'
+NB_RANGE = 0
+BENCHMARK_CSV = f'benchmark/benchmark_results_small_nb{NB_RANGE}.csv'
 
 
 def load_reactions(filepath: str, nb_range: int = 0) -> List[Reaction]:
@@ -204,6 +204,7 @@ def cluster_filtered_reactions(filtered_reactions: ClusterSpace) -> ClusterSpace
     return final_cluster_space
 
 
+# WP4: Implementation of Weisfeiler-Lehman graph hash
 def weisfeiler_leman_hash(graph: nx.Graph, iterations: int = 1, node_attr: str = 'element', edge_attr: str = 'order') -> str:
     """
     Computes the Weisfeiler-Leman graph hash of a graph.
@@ -341,7 +342,7 @@ def benchmark_clustering(invariant_list: List, reactions: List[Reaction], output
 
 
 def main():
-    reactions = load_reactions(FILEPATH_BIG, nb_range=NB_RANGE)
+    reactions = load_reactions(FILEPATH, nb_range=NB_RANGE)
 
     # print("Starting clustering...")
     # start_time = time.process_time()
@@ -387,6 +388,7 @@ def main():
     ]
 
     benchmark_clustering(invariant_list, reactions, BENCHMARK_CSV)
+    
     print("Done.")
 
 

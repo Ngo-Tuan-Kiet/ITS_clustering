@@ -2,3 +2,4 @@ benchmark/
 *.pkl
 *.gz
 *.csv
+*.png
